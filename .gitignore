@@ -1,0 +1,13 @@
+# Windows executables
+*.exe
+
+# Optional build artifacts
+*.out
+*.o
+*.obj
+
+# VS Code
+.vscode/
+
+# Temporary files
+*.log
