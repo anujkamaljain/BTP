@@ -1,0 +1,1 @@
+“All rights reserved. Unauthorized use prohibited.”
