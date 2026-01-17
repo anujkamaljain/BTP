@@ -1,249 +1,391 @@
-#include <bits/stdc++.h>
+#include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <set>
+#include <vector>
+
 using namespace std;
 
-// Use long double for precision
-using ld = long double;
-const ld INF_LD = 1e300L;   
-const ld EPS = 1e-18L;
+const double INF = numeric_limits<double>::infinity();
+const double EPSILON = 0.001;
+
+struct Edge {
+  int from, to;
+  double cost;
+};
+
+class OpportunisticRouting {
+private:
+  int numNodes;
+  int source;
+  set<int> destinations;
+  vector<Edge> edges;
+  map<int, map<int, double>> graph;
+  map<int, map<set<int>, double>> routingTable;
+  map<int, map<set<int>, set<int>>> bestForwardingSet;
+
+public:
+  OpportunisticRouting(int n, int src) : numNodes(n), source(src) {}
+
+  void addEdge(int from, int to, double cost) {
+    edges.push_back({from, to, cost});
+    graph[from][to] = cost;
+    cout << "Added edge: " << from << " -> " << to << " with cost " << cost
+         << endl;
+  }
+
+  void addDestination(int dest) {
+    destinations.insert(dest);
+    cout << "Added destination: " << dest << endl;
+  }
+
+  set<int> getNeighbors(int node) {
+    set<int> neighbors;
+    for (const auto &edge : edges) {
+      if (edge.from == node) {
+        neighbors.insert(edge.to);
+      }
+    }
+    return neighbors;
+  }
+
+  set<int> getPredecessors(const set<int> &destSet) {
+    set<int> predecessors;
+    for (const auto &edge : edges) {
+      if (destSet.find(edge.to) != destSet.end()) {
+        predecessors.insert(edge.from);
+      }
+    }
+    return predecessors;
+  }
+
+  double calculateCostIterative(int node, const set<int> &destSet,
+                                const set<int> &forwardingSet) {
+    // cout << "\n  Calculating cost from node " << node << " to dest set {";
+    // for (int d : destSet)
+    //   cout << d << " ";
+    // cout << "} using FS {";
+    // for (int f : forwardingSet)
+    //   cout << f << " ";
+    // cout << "}" << endl;
+
+    if (destSet.size() == 1 && destSet.find(node) != destSet.end()) {
+      // cout << "  Node " << node << " is the only destination, cost = 0"
+      //      << endl;
+      return 0.0;
+    }
+
+    vector<double> costs;
+    vector<int> fsNodes;
+
+    for (int neighbor : forwardingSet) {
+      if (graph[node].count(neighbor)) {
+        costs.push_back(graph[node][neighbor]);
+        fsNodes.push_back(neighbor);
+      }
+    }
+
+    if (costs.empty()) {
+      return INF;
+    }
+
+    vector<double> p;
+    for (double c : costs) {
+      p.push_back(1.0 / c);
+    }
+
+    // cout << "  Raw probabilities (1/cost): ";
+    // for (int i = 0; i < fsNodes.size(); i++) {
+    //   cout << "p" << (i + 1) << "(" << fsNodes[i] << ")=" << fixed
+    //        << setprecision(3) << p[i] << " ";
+    // }
+    // cout << endl;
+
+    double x = 5.0;
+    double prevX;
+    int iterations = 0;
+    const int maxIterations = 1000;
+
+    do {
+      prevX = x;
+      double newX = 0.0;
+
+      int n = fsNodes.size();
+      for (int mask = 0; mask < (1 << n); mask++) {
+        double probability = 1.0;
+        set<int> successfulNodes;
+
+        for (int i = 0; i < n; i++) {
+          if (mask & (1 << i)) {
+            probability *= p[i];
+            successfulNodes.insert(fsNodes[i]);
+          } else {
+            probability *= (1.0 - p[i]);
+          }
+        }
+
+        double remainingCost = 0.0;
+
+        set<int> uncoveredDests = destSet;
+        for (int sNode : successfulNodes) {
+          uncoveredDests.erase(sNode);
+        }
+
+        if (uncoveredDests.empty()) {
+          remainingCost = 0.0;
+        } else if (successfulNodes.empty()) {
+          remainingCost = prevX;
+        } else {
+          // Some nodes received, find min cost from successful nodes to
+          // uncovered destinations
+          double minCost = INF;
+
+          for (int sNode : successfulNodes) {
+            // Cost from this successful forwarding node to reach uncovered
+            // destinations
+            double costFromSNode = 0.0;
+
+            if (uncoveredDests.size() == 1) {
+              // Single uncovered destination
+              int uncovDest = *uncoveredDests.begin();
+              set<int> singleDestSet;
+              singleDestSet.insert(uncovDest);
+
+              // Check routing table of successful node
+              if (routingTable[sNode].count(singleDestSet)) {
+                costFromSNode = routingTable[sNode][singleDestSet];
+              } else if (graph[sNode].count(uncovDest)) {
+                // Direct link from forwarding node
+                costFromSNode = graph[sNode][uncovDest];
+              } else if (graph[node].count(uncovDest)) {
+                // No route from forwarding node, use direct link from original
+                // node
+                costFromSNode = graph[node][uncovDest];
+              } else {
+                costFromSNode = INF;
+              }
+            } else {
+              // Multiple uncovered destinations
+              if (routingTable[sNode].count(uncoveredDests)) {
+                costFromSNode = routingTable[sNode][uncoveredDests];
+              } else if (routingTable[node].count(uncoveredDests)) {
+                // No route from forwarding node, use routing table from
+                // original node
+                costFromSNode = routingTable[node][uncoveredDests];
+              } else {
+                costFromSNode = INF;
+              }
+            }
+
+            minCost = min(minCost, costFromSNode);
+          }
+
+          remainingCost = minCost;
+        }
+
+        newX += probability * (1.0 + remainingCost);
+      }
+
+      x = newX;
+      iterations++;
+
+    } while (fabs(x - prevX) > EPSILON && iterations < maxIterations);
+
+    // cout << "  Converged after " << iterations
+    //      << " iterations, cost = " << fixed << setprecision(2) << x << endl;
+    return x;
+  }
+
+  void buildRoutingTableForNode(int node) {
+    // cout << "\n=== Building routing table for node " << node << " ==="
+    //      << endl;
+
+    set<int> neighbors = getNeighbors(node);
+    vector<set<int>> destSubsets;
+
+    for (int dest : destinations) {
+      set<int> single;
+      single.insert(dest);
+      destSubsets.push_back(single);
+    }
+
+    if (destinations.size() > 1) {
+      destSubsets.push_back(destinations);
+    }
+
+    for (const auto &destSet : destSubsets) {
+      // cout << "\nDestination set: {";
+      // for (int d : destSet)
+      //   cout << d << " ";
+      // cout << "}" << endl;
+
+      bool isDestination =
+          (destSet.find(node) != destSet.end() && destSet.size() == 1);
+      if (isDestination) {
+        routingTable[node][destSet] = 0.0;
+        // cout << "Node " << node << " is the destination, cost = 0" << endl;
+        continue;
+      }
+
+      double bestCost = INF;
+      set<int> bestFS;
+
+      vector<set<int>> forwardingSets;
+
+      for (int neighbor : neighbors) {
+        set<int> fs;
+        fs.insert(neighbor);
+        forwardingSets.push_back(fs);
+      }
+
+      if (neighbors.size() > 1) {
+        forwardingSets.push_back(neighbors);
+      }
+
+      for (const auto &fs : forwardingSets) {
+        double cost = calculateCostIterative(node, destSet, fs);
+
+        if (cost < bestCost) {
+          bestCost = cost;
+          bestFS = fs;
+        }
+      }
+
+      routingTable[node][destSet] = bestCost;
+      bestForwardingSet[node][destSet] = bestFS;
+
+      // cout << "Best FS for node " << node << " to {";
+      // for (int d : destSet)
+      //   cout << d << " ";
+      // cout << "} is {";
+      // for (int f : bestFS)
+      //   cout << f << " ";
+      // cout << "} with cost " << fixed << setprecision(2) << bestCost << endl;
+    }
+  }
+
+  void solve() {
+    cout << "\n********** OPPORTUNISTIC ROUTING ALGORITHM **********" << endl;
+    cout << "Source: " << source << endl;
+    cout << "Destinations: {";
+    for (int d : destinations)
+      cout << d << " ";
+    cout << "}" << endl;
+    cout << "Number of nodes: " << numNodes << endl;
+
+    // Step 1: Build routing tables for destination nodes
+    // cout << "\n--- Step 1: Initialize destination nodes ---" << endl;
+    for (int dest : destinations) {
+      set<int> single;
+      single.insert(dest);
+      routingTable[dest][single] = 0.0;
+      // cout << "Node " << dest << " is a destination, cost to itself = 0"
+      //      << endl;
+    }
+
+    // Step 2: Build routing tables for neighbors of destinations
+    // cout << "\n--- Step 2: Build routing tables for neighbors of destinations
+    // "
+    //         "---"
+    //      << endl;
+    set<int> predecessors = getPredecessors(destinations);
+
+    for (int node : predecessors) {
+      if (destinations.find(node) == destinations.end()) {
+        buildRoutingTableForNode(node);
+      }
+    }
+
+    // Step 3: Build routing table for source
+    // cout << "\n--- Step 3: Build routing table for source node ---" << endl;
+    buildRoutingTableForNode(source);
+
+    cout << "\n\n********** FINAL ROUTING TABLES **********" << endl;
+
+    for (auto &nodeEntry : routingTable) {
+      int node = nodeEntry.first;
+      cout << "\nNode " << node << " routing table:" << endl;
+
+      for (auto &destEntry : nodeEntry.second) {
+        const set<int> &destSet = destEntry.first;
+        double cost = destEntry.second;
+
+        cout << "  " << node << " -> {";
+        for (int d : destSet)
+          cout << d << " ";
+        cout << "} : " << fixed << setprecision(2) << cost;
+
+        if (bestForwardingSet[node].count(destSet)) {
+          cout << " (FS={";
+          for (int f : bestForwardingSet[node][destSet])
+            cout << f << " ";
+          cout << "})";
+        }
+        cout << endl;
+      }
+    }
+
+    cout << "\n\n********** FINAL RESULT **********" << endl;
+    cout << "Cost from source " << source << " to destination set {";
+    for (int d : destinations)
+      cout << d << " ";
+    cout << "} = " << fixed << setprecision(2)
+         << routingTable[source][destinations] << endl;
+    cout << "Best Forwarding Set: {";
+    for (int f : bestForwardingSet[source][destinations])
+      cout << f << " ";
+    cout << "}" << endl;
+  }
+
+  void displayTopology() {
+    cout << "\n=== Network Topology ===" << endl;
+    cout << "Node1 -> Node2 : Cost" << endl;
+    for (const auto &edge : edges) {
+      cout << edge.from << " -> " << edge.to << " : " << edge.cost << endl;
+    }
+  }
+};
 
 int main() {
-    ios::sync_with_stdio(false);
-    cin.tie(nullptr);
+  cout << "=== OPPORTUNISTIC ROUTING SIMULATION ===" << endl;
+  cout << "========================================" << endl;
 
-    int n;
-    cout << "Enter number of nodes: " << flush;
-    while (!(cin >> n) || n <= 0) {
-        cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        cout << "Invalid. Enter a positive integer: " << flush;
-    }
+  int numNodes, numEdges, source, numDest;
 
-    // link success probabilities p[u][v]
-    vector<vector<ld>> p(n, vector<ld>(n, 0.0L));
-    for (int u = 0; u < n; ++u) {
-        for (int v = 0; v < n; ++v) {
-            if (u == v) continue;
-            char r;
-            cout << "Is there a path from " << u << " -> " << v << "? (y/n): " << flush;
-            cin >> r;
-            if (r == 'y' || r == 'Y') {
-                long double etx;
-                cout << "  Enter ETX for " << u << " -> " << v << "  (ETX >= 1): " << flush;
-                while (!(cin >> etx) || etx < 1.0L - (long double)EPS) {
-                    cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n');
-                    cout << "  Invalid. Enter ETX >= 1: " << flush;
-                }
-                ld prob = 1.0L / (ld)etx;
-                prob = max<ld>(0.0L, min<ld>(1.0L, prob));
-                p[u][v] = prob;
-            }
-        }
-    }
+  cout << "\nEnter number of nodes: ";
+  cin >> numNodes;
 
-    int src;
-    cout << "\nEnter source node (0.." << n - 1 << "): " << flush;
-    while (!(cin >> src) || src < 0 || src >= n) {
-        cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        cout << "Invalid. Enter source node (0.." << n - 1 << "): " << flush;
-    }
+  cout << "Enter source node: ";
+  cin >> source;
 
-    cout << "Enter number of destination nodes: " << flush;
-    int m;
-    while (!(cin >> m) || m <= 0 || m > 20) {
-        cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        cout << "Invalid. Enter a positive integer (<=20): " << flush;
-    }
+  OpportunisticRouting router(numNodes, source);
 
-    vector<int> dests(m);
-    cout << "Enter destination node IDs (space separated): " << flush;
-    for (int i = 0; i < m; ++i) {
-        while (!(cin >> dests[i]) || dests[i] < 0 || dests[i] >= n) {
-            cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n');
-            cout << "Invalid id. Enter destination node ID (0.." << n - 1 << "): " << flush;
-        }
-    }
+  cout << "Enter number of destinations: ";
+  cin >> numDest;
 
-    // mask of destinations per node
-    vector<int> nodeDestMask(n, 0);
-    for (int i = 0; i < m; ++i) nodeDestMask[dests[i]] = (1 << i);
+  cout << "Enter destination nodes: ";
+  for (int i = 0; i < numDest; i++) {
+    int dest;
+    cin >> dest;
+    router.addDestination(dest);
+  }
 
-    int FULL = (1 << m) - 1;
+  cout << "\nEnter number of edges: ";
+  cin >> numEdges;
 
-    // build neighbor lists
-    vector<vector<int>> neigh(n);
-    for (int u = 0; u < n; ++u) {
-        for (int v = 0; v < n; ++v) {
-            if (u != v && p[u][v] > 0.0L) neigh[u].push_back(v);
-        }
-    }
+  cout << "Enter edges (from to cost):" << endl;
+  for (int i = 0; i < numEdges; i++) {
+    int from, to;
+    double cost;
+    cin >> from >> to >> cost;
+    router.addEdge(from, to, cost);
+  }
 
-    // DP tables
-    vector<vector<ld>> C(n, vector<ld>(1 << m, INF_LD));
-    vector<vector<vector<int>>> bestFS(n, vector<vector<int>>(1 << m));
-    for (int u = 0; u < n; ++u) C[u][FULL] = 0.0L;
+  router.displayTopology();
+  router.solve();
 
-    // process masks by descending popcount so transitions go to larger masks already computed
-    vector<int> masks;
-    masks.reserve(FULL + 1);
-    for (int mask = 0; mask <= FULL; ++mask) masks.push_back(mask);
-    sort(masks.begin(), masks.end(), [&](int a, int b) {
-        int ca = __builtin_popcount((unsigned)a);
-        int cb = __builtin_popcount((unsigned)b);
-        return ca != cb ? ca > cb : a < b;
-    });
-
-    for (int mask : masks) {
-        if (mask == FULL) continue;
-        for (int u = 0; u < n; ++u) {
-            int startingMask = mask;
-            if ((nodeDestMask[u] & (~mask)) != 0) {
-                startingMask = mask | nodeDestMask[u];
-                if (startingMask == FULL) {
-                    C[u][mask] = 0.0L;
-                    bestFS[u][mask].clear();
-                    continue;
-                }
-            }
-
-            if (neigh[u].empty()) {
-                C[u][mask] = INF_LD;
-                bestFS[u][mask].clear();
-                continue;
-            }
-
-            ld bestCost = C[u][mask];
-            vector<int> bestSet;
-            int d = (int)neigh[u].size();
-            int maxS = 1 << d;
-
-            for (int sMask = 1; sMask < maxS; ++sMask) {
-                // prob none in S receives
-                ld probNone = 1.0L;
-                for (int i = 0; i < d; ++i) if (sMask & (1 << i))
-                    probNone *= (1.0L - p[u][neigh[u][i]]);
-                ld Psucc = 1.0L - probNone;
-                if (Psucc <= EPS) continue;
-
-                ld expectedRemain = 0.0L;
-                bool bad = false;
-
-                // iterate receiver subsets R of S
-                for (int rMask = sMask; rMask; rMask = (rMask - 1) & sMask) {
-                    ld probR = 1.0L;
-                    int maskAfter = startingMask;
-                    for (int i = 0; i < d; ++i) if (sMask & (1 << i)) {
-                        int v = neigh[u][i];
-                        if (rMask & (1 << i)) {
-                            probR *= p[u][v];
-                            maskAfter |= nodeDestMask[v];
-                        } else probR *= (1.0L - p[u][v]);
-                    }
-                    ld cnext = C[u][maskAfter];
-                    if (cnext >= INF_LD / 2) { bad = true; break; }
-                    expectedRemain += probR * cnext;
-                }
-                if (bad) continue;
-
-                ld candidate = (1.0L + expectedRemain) / Psucc;
-                if (candidate + 1e-15L < bestCost) {
-                    bestCost = candidate;
-                    bestSet.clear();
-                    for (int i = 0; i < d; ++i) if (sMask & (1 << i)) bestSet.push_back(neigh[u][i]);
-                }
-            }
-
-            C[u][mask] = bestCost;
-            bestFS[u][mask] = bestSet;
-        }
-    }
-
-    // Backward sharing computation for source node
-    {
-        int mask = 0;
-        ld bestCost = INF_LD;
-        vector<int> bestSet;
-        vector<int> relays;
-        relays.reserve(n);
-
-        for (int i = 0; i < n; ++i)
-            if (i != src && !nodeDestMask[i] && !neigh[i].empty())
-                relays.push_back(i);
-
-        int d = (int)relays.size();
-        int maxS = 1 << d;
-        for (int sMask = 1; sMask < maxS; ++sMask) {
-            ld probNone = 1.0L;
-            for (int i = 0; i < d; ++i) if (sMask & (1 << i))
-                probNone *= (1.0L - p[src][relays[i]]);
-            ld Psucc = 1.0L - probNone;
-            if (Psucc <= EPS) continue;
-
-            ld expectedRemain = 0.0L;
-            for (int rMask = sMask; rMask; rMask = (rMask - 1) & sMask) {
-                ld probR = 1.0L;
-                ld minCost = INF_LD;
-                for (int i = 0; i < d; ++i) if (sMask & (1 << i)) {
-                    if (rMask & (1 << i)) {
-                        probR *= p[src][relays[i]];
-                        minCost = min(minCost, C[relays[i]][mask]);
-                    } else probR *= (1.0L - p[src][relays[i]]);
-                }
-                if (probR > 0) {
-                    if (minCost >= INF_LD / 2) { expectedRemain = INF_LD; break; }
-                    expectedRemain += probR * minCost;
-                }
-            }
-            if (expectedRemain >= INF_LD / 2) continue;
-
-            ld candidate = (1.0L + expectedRemain) / Psucc;
-            if (candidate < bestCost) {
-                bestCost = candidate;
-                bestSet.clear();
-                for (int i = 0; i < d; ++i) if (sMask & (1 << i)) bestSet.push_back(relays[i]);
-            }
-        }
-
-        // write back so final table shows source cost
-        if (bestCost < INF_LD / 2) {
-            C[src][0] = bestCost;
-            bestFS[src][0] = bestSet;
-        }
-
-        cout << "\nSource Backward Computation:\n";
-        if (bestCost >= INF_LD / 2)
-            cout << "Source " << src << " has no viable multicast path.\n";
-        else {
-            cout << "Minimum cost from source " << src << " to all destinations = "
-                 << (double)bestCost << " expected transmissions.\n";
-            cout << "Best forwarding set: { ";
-            for (size_t i = 0; i < bestSet.size(); ++i)
-                cout << bestSet[i] << (i + 1 < bestSet.size() ? ", " : " ");
-            cout << "}\n";
-        }
-    }
-
-    // Print final table
-    cout << "\nRouting Table:\n\n";
-    cout << left << setw(6) << "Node" << setw(16) << "Cost" << "ForwardingSet\n";
-    cout << "-----------------------------------------\n";
-    cout.setf(std::ios::fixed); cout << setprecision(6);
-    for (int u = 0; u < n; ++u) {
-        ld cost = C[u][0];
-        cout << left << setw(6) << u;
-        if (cost >= INF_LD / 2) cout << setw(16) << "INF";
-        else cout << setw(16) << (double)cost;
-        if (bestFS[u][0].empty()) {
-            if (nodeDestMask[u]) cout << " (dst)";
-            else cout << " -";
-        } else {
-            cout << " (";
-            for (size_t i = 0; i < bestFS[u][0].size(); ++i) {
-                cout << bestFS[u][0][i];
-                if (i + 1 < bestFS[u][0].size()) cout << ",";
-            }
-            cout << ")";
-        }
-        cout << "\n";
-    }
-
-    return 0;
+  return 0;
 }
