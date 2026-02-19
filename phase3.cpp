@@ -2,6 +2,7 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <climits>
 #include <limits>
 #include <map>
 #include <random>

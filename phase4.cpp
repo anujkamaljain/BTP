@@ -1,11 +1,12 @@
 #include <algorithm>
+#include <climits>
 #include <cmath>
+#include <ctime>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <queue>
-#include <random>
 #include <set>
 #include <vector>
 
@@ -13,6 +14,73 @@ using namespace std;
 
 const double INF = numeric_limits<double>::infinity();
 const double EPSILON = 0.001;
+
+// Required constants/macros for L'Ecuyer RNG
+#define IM1 2147483563
+#define IM2 2147483399
+#define AM (1.0/IM1)
+#define IMM1 (IM1-1)
+#define IA1 40014
+#define IA2 40692
+#define IQ1 53668
+#define IQ2 52774
+#define IR1 12211
+#define IR2 3791
+#define NTAB 32
+#define NDIV (1+IMM1/NTAB)
+#define EPS_RNG 1.2e-7
+#define RNMX (1.0-EPS_RNG)
+
+float randomgeneration(long &idum)
+{
+    int j;
+    long k;
+    static long idum2 = 123456789;
+    static long iy = 0;
+    static long iv[NTAB];
+    float temp;
+
+    if (idum <= 0)
+    {
+        if (-(idum) < 1)
+            idum = 1;
+        else
+            idum = -(idum);
+
+        idum2 = idum;
+
+        for (j = NTAB + 7; j >= 0; j--)
+        {
+            k = idum / IQ1;
+            idum = IA1 * (idum - k * IQ1) - k * IR1;
+            if (idum < 0) idum += IM1;
+            if (j < NTAB) iv[j] = idum;
+        }
+        iy = iv[0];
+    }
+
+    k = idum / IQ1;
+    idum = IA1 * (idum - k * IQ1) - k * IR1;
+    if (idum < 0) idum += IM1;
+
+    k = idum2 / IQ2;
+    idum2 = IA2 * (idum2 - k * IQ2) - k * IR2;
+    if (idum2 < 0) idum2 += IM2;
+
+    j = iy / NDIV;
+    iy = iv[j] - idum2;
+    iv[j] = idum;
+
+    if (iy < 1) iy += IMM1;
+
+    if ((temp = AM * iy) > RNMX)
+        return RNMX;
+    else
+        return temp;
+}
+
+// Global seed - negative value triggers initialization on first call
+long global_seed = -(long)time(NULL);
 
 struct Edge {
   int from, to;
@@ -316,8 +384,7 @@ public:
   }
 
   // Simulate transmission of one packet from currentNode to uncoveredDests
-  int simulatePacketTransmission(int currentNode, set<int> uncoveredDests,
-                                 mt19937 &rng, int &transmissions) {
+  int simulatePacketTransmission(int currentNode, set<int> uncoveredDests, int &transmissions) {
     // Base case: all destinations reached
     if (uncoveredDests.empty()) {
       return transmissions;
@@ -341,8 +408,7 @@ public:
         calculateProbabilityRegions(currentNode, forwardingSet);
 
     // Generate random number [0, 1]
-    uniform_real_distribution<> dis(0.0, 1.0);
-    double randomNum = dis(rng);
+    double randomNum = (double)randomgeneration(global_seed);
 
     // Find which outcome occurred
     TransmissionOutcome selectedOutcome;
@@ -371,8 +437,7 @@ public:
 
     // If no nodes received, retransmit from same node
     if (selectedOutcome.successfulNodes.empty()) {
-      return simulatePacketTransmission(currentNode, newUncovered, rng,
-                                        transmissions);
+      return simulatePacketTransmission(currentNode, newUncovered, transmissions);
     }
 
     // Some nodes received - find the one with minimum cost to remaining
@@ -403,18 +468,16 @@ public:
 
     if (nextNode == -1) {
       // No valid next node found - retransmit from current node
-      return simulatePacketTransmission(currentNode, newUncovered, rng,
-                                        transmissions);
+      return simulatePacketTransmission(currentNode, newUncovered, transmissions);
     }
 
     // Continue from the best next node
-    return simulatePacketTransmission(nextNode, newUncovered, rng,
-                                      transmissions);
+    return simulatePacketTransmission(nextNode, newUncovered, transmissions);
   }
 
   // Simulate packet until ANY destination receives it
   // Returns: destination ID that received, -1 on error
-  int simulateToAnyDestination(mt19937 &rng, int &transmissions) {
+  int simulateToAnyDestination(int &transmissions) {
     int currentNode = source;
     set<int> uncoveredDests = destinations;
 
@@ -433,8 +496,7 @@ public:
           calculateProbabilityRegions(currentNode, forwardingSet);
 
       // Generate random number
-      uniform_real_distribution<> dis(0.0, 1.0);
-      double randomNum = dis(rng);
+      double randomNum = (double)randomgeneration(global_seed);
 
       // Find outcome
       TransmissionOutcome selectedOutcome;
@@ -488,10 +550,6 @@ public:
     cout << "\n\n********** PACKET TRANSMISSION SIMULATION **********" << endl;
     cout << "Simulating " << numPackets << " packets..." << endl;
 
-    // Initialize random number generator
-    random_device rd;
-    mt19937 rng(rd());
-
     vector<int> transmissionCounts;
     int totalTransmissions = 0;
     int minTransmissions = INT_MAX;
@@ -501,7 +559,7 @@ public:
     for (int i = 0; i < numPackets; i++) {
       int transmissions = 0;
       int result =
-          simulatePacketTransmission(source, destinations, rng, transmissions);
+          simulatePacketTransmission(source, destinations, transmissions);
 
       if (result == -1) {
         cout << "Error: Simulation failed for packet " << (i + 1) << endl;
@@ -543,9 +601,6 @@ public:
       return;
     }
 
-    random_device rd;
-    mt19937 rng(rd());
-
     vector<int> destList(destinations.begin(), destinations.end());
     int dest1 = destList[0];
     int dest2 = destList[1];
@@ -565,7 +620,7 @@ public:
       // Phase 1: Simulate each packet until ANY destination receives
       for (int pkt = 1; pkt <= packetsPerBatch; pkt++) {
         int transmissions = 0;
-        int receivedBy = simulateToAnyDestination(rng, transmissions);
+        int receivedBy = simulateToAnyDestination(transmissions);
         totalTransmissionsNC += transmissions;
 
         if (receivedBy != -1) {
@@ -654,8 +709,7 @@ public:
   // =========== PHASE 4: MULTI-SOURCE NETWORK CODING SIMULATION ===========
 
   // Simulate from source to any forwarding node, return node that received
-  int simulateToForwardingNode(int sourceNode, mt19937 &rng,
-                               int &transmissions) {
+  int simulateToForwardingNode(int sourceNode, int &transmissions) {
     set<int> forwardingNodes;
     for (auto &edge : edges) {
       if (edge.from == sourceNode) {
@@ -670,8 +724,7 @@ public:
     while (true) {
       vector<TransmissionOutcome> outcomes =
           calculateProbabilityRegions(sourceNode, forwardingNodes);
-      uniform_real_distribution<> dis(0.0, 1.0);
-      double randVal = dis(rng);
+      double randVal = (double)randomgeneration(global_seed);
 
       TransmissionOutcome selected;
       for (const auto &outcome : outcomes) {
@@ -703,24 +756,23 @@ public:
     }
   }
 
-  // Simulate from forwarding node to any destination
-  int simulateFromForwardingToDestination(int forwardingNode, mt19937 &rng,
-                                          int &transmissions) {
+  // Simulate from forwarding node to destinations
+  // Returns set of ALL destinations that received the coded packet
+  set<int> simulateFromForwardingToDestination(int forwardingNode, int &transmissions) {
     int currentNode = forwardingNode;
 
     while (true) {
       if (!bestForwardingSet[currentNode].count(destinations)) {
-        return -1;
+        return {};  // empty set
       }
 
       set<int> fwdSet = bestForwardingSet[currentNode][destinations];
       if (fwdSet.empty())
-        return -1;
+        return {};
 
       vector<TransmissionOutcome> outcomes =
           calculateProbabilityRegions(currentNode, fwdSet);
-      uniform_real_distribution<> dis(0.0, 1.0);
-      double randVal = dis(rng);
+      double randVal = (double)randomgeneration(global_seed);
 
       TransmissionOutcome selected;
       for (const auto &outcome : outcomes) {
@@ -732,14 +784,20 @@ public:
 
       transmissions++;
 
-      // Check if any destination received
+      // Check ALL destinations that received this transmission
+      set<int> receivedDests;
       for (int dest : destinations) {
         if (selected.successfulNodes.count(dest)) {
-          return dest;
+          receivedDests.insert(dest);
         }
       }
 
-      // Find best node to continue
+      // If any destination received, return ALL that received
+      if (!receivedDests.empty()) {
+        return receivedDests;
+      }
+
+      // No destination received - find best node to continue
       if (!selected.successfulNodes.empty()) {
         int nextNode = -1;
         double minCost = INF;
@@ -760,9 +818,11 @@ public:
     }
   }
 
-  // Run Phase 4 Multi-Source NC Simulation
-  void runPhase4Simulation(const vector<int> &sources, int packetsPerSource) {
-    cout << "\n\n********** PHASE 4: MULTI-SOURCE NC SIMULATION **********"
+  // Run Phase 4 Multi-Source NC Simulation with Coding Window
+  void runPhase4Simulation(const vector<int> &sources, int packetsPerSource,
+                           int codingWindowSize) {
+    cout << "\n\n********** PHASE 4: MULTI-SOURCE NC WITH CODING WINDOW "
+            "**********"
          << endl;
     cout << "Sources: {";
     for (int s : sources)
@@ -773,14 +833,17 @@ public:
     cout << "}" << endl;
     cout << "Packets per source: " << packetsPerSource << endl;
 
-    random_device rd;
-    mt19937 rng(rd());
-
     // Data structures
     map<int, vector<int>> sourcePackets; // source -> [packet IDs]
     map<int, queue<pair<int, int>>>
-        forwardingQueues;            // node -> queue of (packet_id, source_id)
+        forwardingQueues; // node -> queue of (packet_id, source_id)
     map<int, set<int>> destReceived; // dest -> {packet IDs received}
+
+    // Coding window structures
+    map<int, vector<int>>
+        codingWindow; // forwarding node -> packet IDs in current window
+    map<int, map<int, int>>
+        windowRecvCount; // forwarding node -> dest -> coded packets received
 
     // Initialize source packets
     int packetId = 1;
@@ -800,9 +863,13 @@ public:
       }
     }
 
-    // Initialize forwarding queues
+    // Initialize forwarding queues and coding windows
     for (int node : forwardingNodes) {
       forwardingQueues[node] = queue<pair<int, int>>();
+      codingWindow[node] = vector<int>();
+      for (int dest : destinations) {
+        windowRecvCount[node][dest] = 0;
+      }
     }
 
     // All selectable nodes (sources + forwarding)
@@ -814,11 +881,13 @@ public:
 
     double totalTransmissions = 0.0;
 
-    // Phase 1: Queue-based transmission
-    cout << "\nPhase 1: Queue-based transmission..." << endl;
+    // Phase 1: Queue-based transmission with Coding Window
+    cout << "\nPhase 1: Queue-based transmission with Coding Window..."
+         << endl;
 
     while (true) {
-      // Check if all sources empty and all queues empty
+      // Check if all sources empty, all queues empty, and all coding windows
+      // empty
       bool allEmpty = true;
       for (int src : sources) {
         if (!sourcePackets[src].empty())
@@ -827,13 +896,16 @@ public:
       for (int fwd : forwardingNodes) {
         if (!forwardingQueues[fwd].empty())
           allEmpty = false;
+        if (!codingWindow[fwd].empty())
+          allEmpty = false;
       }
       if (allEmpty)
         break;
 
       // Random node selection from sources + forwarding nodes
-      uniform_int_distribution<> nodeDis(0, selectableNodes.size() - 1);
-      int selectedNode = selectableNodes[nodeDis(rng)];
+      int nodeIdx = (int)(randomgeneration(global_seed) * selectableNodes.size());
+      if (nodeIdx >= (int)selectableNodes.size()) nodeIdx = selectableNodes.size() - 1;
+      int selectedNode = selectableNodes[nodeIdx];
 
       // Check if it's a source node
       if (find(sources.begin(), sources.end(), selectedNode) != sources.end()) {
@@ -851,12 +923,10 @@ public:
 
           if (!neighbors.empty()) {
             // Simulate transmission to neighbors
-            int transmissions = 0;
             while (true) {
               vector<TransmissionOutcome> outcomes =
                   calculateProbabilityRegions(selectedNode, neighbors);
-              uniform_real_distribution<> dis(0.0, 1.0);
-              double randVal = dis(rng);
+              double randVal = (double)randomgeneration(global_seed);
 
               TransmissionOutcome selected;
               for (const auto &outcome : outcomes) {
@@ -867,7 +937,6 @@ public:
                 }
               }
 
-              transmissions++;
               totalTransmissions++;
 
               if (!selected.successfulNodes.empty()) {
@@ -902,19 +971,62 @@ public:
           }
         }
       }
-      // Check if it's a forwarding node
+      // Check if it's a forwarding node (Coding Window logic)
       else if (forwardingNodes.count(selectedNode)) {
-        if (!forwardingQueues[selectedNode].empty()) {
-          auto [pktId, srcId] = forwardingQueues[selectedNode].front();
+        // Step 1: Fill coding window from queue (up to codingWindowSize)
+        while ((int)codingWindow[selectedNode].size() < codingWindowSize &&
+               !forwardingQueues[selectedNode].empty()) {
+          pair<int, int> windowEntry = forwardingQueues[selectedNode].front();
           forwardingQueues[selectedNode].pop();
+          codingWindow[selectedNode].push_back(windowEntry.first);
+        }
+
+        // Step 2: If coding window has packets, transmit a coded packet
+        if (!codingWindow[selectedNode].empty()) {
+          // Capture window size BEFORE transmission as the decoding target
+          int targetWindowSize = (int)codingWindow[selectedNode].size();
 
           int transmissions = 0;
-          int destNode = simulateFromForwardingToDestination(selectedNode, rng,
-                                                             transmissions);
+          set<int> receivedDests = simulateFromForwardingToDestination(
+              selectedNode, transmissions);
           totalTransmissions += transmissions;
 
-          if (destNode != -1) {
-            destReceived[destNode].insert(pktId);
+          // Increment counter for ALL destinations that received
+          for (int dest : receivedDests) {
+            windowRecvCount[selectedNode][dest]++;
+          }
+
+          // Step 3: Check if all destinations received enough coded packets
+          // Use the target size captured before transmission (not after refill)
+          bool allDestsReceived = true;
+          for (int dest : destinations) {
+            if (windowRecvCount[selectedNode][dest] < targetWindowSize) {
+              allDestsReceived = false;
+              break;
+            }
+          }
+
+          if (allDestsReceived && targetWindowSize > 0) {
+            // All destinations can decode all packets in the window
+            // Mark all window packets as delivered to all destinations
+            for (int pId : codingWindow[selectedNode]) {
+              for (int dest : destinations) {
+                destReceived[dest].insert(pId);
+              }
+            }
+            // Empty the coding window and reset counts
+            codingWindow[selectedNode].clear();
+            for (int dest : destinations) {
+              windowRecvCount[selectedNode][dest] = 0;
+            }
+          }
+
+          // Step 4: Refill window with new arrivals AFTER flush check
+          while ((int)codingWindow[selectedNode].size() < codingWindowSize &&
+                 !forwardingQueues[selectedNode].empty()) {
+            pair<int, int> newEntry = forwardingQueues[selectedNode].front();
+            forwardingQueues[selectedNode].pop();
+            codingWindow[selectedNode].push_back(newEntry.first);
           }
         }
       }
@@ -946,30 +1058,16 @@ public:
           dest2Missing.insert(pkt);
       }
 
-      // XOR opportunities
+      // XOR: each XOR delivers one unique packet to each destination
       while (!dest1Missing.empty() && !dest2Missing.empty()) {
-        bool foundXOR = false;
-        for (int p1 : destReceived[dest1]) {
-          if (dest2Missing.count(p1)) {
-            for (int p2 : destReceived[dest2]) {
-              if (dest1Missing.count(p2)) {
-                // XOR helps both
-                totalTransmissions += edgeCount;
-                xorCount++;
-                dest1Missing.erase(p2);
-                dest2Missing.erase(p1);
-                destReceived[dest1].insert(p2);
-                destReceived[dest2].insert(p1);
-                foundXOR = true;
-                break;
-              }
-            }
-            if (foundXOR)
-              break;
-          }
-        }
-        if (!foundXOR)
-          break;
+        int p1 = *dest1Missing.begin();
+        int p2 = *dest2Missing.begin();
+        totalTransmissions += edgeCount;
+        xorCount++;
+        dest1Missing.erase(p1);
+        dest2Missing.erase(p2);
+        destReceived[dest1].insert(p1);
+        destReceived[dest2].insert(p2);
       }
 
       // Individual sends for remaining
@@ -995,8 +1093,9 @@ public:
     // Results
     double avgTrans = totalTransmissions / totalPackets;
 
-    cout << "\n********** PHASE 4 RESULTS **********" << endl;
+    cout << "\n********** PHASE 4 RESULTS (CODING WINDOW) **********" << endl;
     cout << "Total packets: " << totalPackets << endl;
+    cout << "Coding Window Size: " << codingWindowSize << endl;
     cout << "Phase 1 transmissions: " << fixed << setprecision(2) << phase1Trans
          << endl;
     cout << "Phase 2 XOR transmissions: " << xorCount << " (cost "
@@ -1082,13 +1181,17 @@ int main() {
 
   router.solve();
 
-  // Ask for packets per source and run simulation directly
+  // Ask for packets per source and coding window size
   int packetsPerSource;
   cout << "\nEnter packets per source: ";
   cin >> packetsPerSource;
 
-  if (packetsPerSource > 0) {
-    router.runPhase4Simulation(sources, packetsPerSource);
+  int codingWindowSize;
+  cout << "Enter coding window size: ";
+  cin >> codingWindowSize;
+
+  if (packetsPerSource > 0 && codingWindowSize > 0) {
+    router.runPhase4Simulation(sources, packetsPerSource, codingWindowSize);
   }
 
   return 0;
