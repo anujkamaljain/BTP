@@ -2,12 +2,14 @@
 #include <climits>
 #include <cmath>
 #include <ctime>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <queue>
 #include <set>
+#include <sstream>
 #include <vector>
 
 using namespace std;
@@ -1138,59 +1140,112 @@ public:
   }
 };
 
+// Helper: read next non-comment, non-empty line from file
+static bool getNextDataLine(ifstream &fin, string &line) {
+  while (getline(fin, line)) {
+    // Trim leading whitespace
+    size_t start = line.find_first_not_of(" \t\r\n");
+    if (start == string::npos) continue; // blank line
+    line = line.substr(start);
+    if (line[0] == '#') continue; // comment line
+    return true;
+  }
+  return false;
+}
+
 int main() {
+  const string inputFile = "phase4_input.txt";
+  ifstream fin(inputFile);
+  if (!fin.is_open()) {
+    cerr << "ERROR: Could not open " << inputFile << endl;
+    cerr << "Make sure phase4_input.txt is in the same directory." << endl;
+    return 1;
+  }
+
+  cout << "=== PHASE 4: MULTI-SOURCE NETWORK CODING ==" << endl;
+  cout << "Reading input from: " << inputFile << endl;
+  cout << "=============================================" << endl;
+
+  string line;
   int numNodes, numEdges, numSources, numDest;
 
-  cout << "\nEnter number of nodes: ";
-  cin >> numNodes;
+  // Number of nodes
+  getNextDataLine(fin, line);
+  numNodes = stoi(line);
+  cout << "Number of nodes: " << numNodes << endl;
 
-  cout << "Enter number of source nodes (1 or 2): ";
-  cin >> numSources;
+  // Number of sources
+  getNextDataLine(fin, line);
+  numSources = stoi(line);
+  cout << "Number of sources: " << numSources << endl;
 
+  // Source nodes
   vector<int> sources;
-  cout << "Enter source node(s): ";
-  for (int i = 0; i < numSources; i++) {
-    int src;
-    cin >> src;
-    sources.push_back(src);
+  getNextDataLine(fin, line);
+  {
+    istringstream iss(line);
+    for (int i = 0; i < numSources; i++) {
+      int src;
+      iss >> src;
+      sources.push_back(src);
+      cout << "Source node: " << src << endl;
+    }
   }
 
   // Use first source for routing table calculation
   OpportunisticRouting router(numNodes, sources[0]);
 
-  cout << "Enter number of destinations (1 or 2): ";
-  cin >> numDest;
+  // Number of destinations
+  getNextDataLine(fin, line);
+  numDest = stoi(line);
+  cout << "Number of destinations: " << numDest << endl;
 
-  cout << "Enter destination nodes: ";
-  for (int i = 0; i < numDest; i++) {
-    int dest;
-    cin >> dest;
-    router.addDestination(dest);
+  // Destination nodes
+  getNextDataLine(fin, line);
+  {
+    istringstream iss(line);
+    for (int i = 0; i < numDest; i++) {
+      int dest;
+      iss >> dest;
+      router.addDestination(dest);
+      cout << "Destination node: " << dest << endl;
+    }
   }
 
-  cout << "\nEnter number of edges: ";
-  cin >> numEdges;
+  // Number of edges
+  getNextDataLine(fin, line);
+  numEdges = stoi(line);
+  cout << "Number of edges: " << numEdges << endl;
 
-  cout << "Enter edges (from to cost):" << endl;
+  // Edges
   for (int i = 0; i < numEdges; i++) {
+    getNextDataLine(fin, line);
+    istringstream iss(line);
     int from, to;
     double cost;
-    cin >> from >> to >> cost;
+    iss >> from >> to >> cost;
     router.addEdge(from, to, cost);
   }
 
+  // Packets per source
+  int packetsPerSource = 0;
+  if (getNextDataLine(fin, line)) {
+    packetsPerSource = stoi(line);
+  }
+
+  // Coding window size
+  int codingWindowSize = 0;
+  if (getNextDataLine(fin, line)) {
+    codingWindowSize = stoi(line);
+  }
+
+  fin.close();
+
   router.solve();
 
-  // Ask for packets per source and coding window size
-  int packetsPerSource;
-  cout << "\nEnter packets per source: ";
-  cin >> packetsPerSource;
-
-  int codingWindowSize;
-  cout << "Enter coding window size: ";
-  cin >> codingWindowSize;
-
   if (packetsPerSource > 0 && codingWindowSize > 0) {
+    cout << "\nPackets per source: " << packetsPerSource << endl;
+    cout << "Coding window size: " << codingWindowSize << endl;
     router.runPhase4Simulation(sources, packetsPerSource, codingWindowSize);
   }
 

@@ -1,0 +1,40 @@
+# ============================================
+# Phase 4 Input File
+# ============================================
+# Edit the values below and re-run phase4.exe
+# Lines starting with # are comments (ignored)
+# ============================================
+
+# Number of nodes in the network
+6
+
+# Number of source nodes (1 or 2)
+2
+
+# Source node(s) (space-separated)
+0 1
+
+# Number of destinations (1 or 2)
+2
+
+# Destination nodes (space-separated)
+4 5
+
+# Number of edges
+8
+
+# Edges (from  to  cost) — one per line
+0 2 4
+0 3 4.5
+1 2 4
+1 3 4.5
+2 4 5
+2 5 5.5
+3 4 10
+3 5 10
+
+# Packets per source
+10000
+
+# Coding window size
+64

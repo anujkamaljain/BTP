@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <climits>
@@ -7,6 +8,7 @@
 #include <map>
 #include <random>
 #include <set>
+#include <sstream>
 #include <vector>
 
 using namespace std;
@@ -552,50 +554,92 @@ public:
   }
 };
 
+// Helper: read next non-comment, non-empty line from file
+static bool getNextDataLine(ifstream &fin, string &line) {
+  while (getline(fin, line)) {
+    // Trim leading whitespace
+    size_t start = line.find_first_not_of(" \t\r\n");
+    if (start == string::npos) continue; // blank line
+    line = line.substr(start);
+    if (line[0] == '#') continue; // comment line
+    return true;
+  }
+  return false;
+}
+
 int main() {
+  const string inputFile = "phase2_input.txt";
+  ifstream fin(inputFile);
+  if (!fin.is_open()) {
+    cerr << "ERROR: Could not open " << inputFile << endl;
+    cerr << "Make sure phase2_input.txt is in the same directory." << endl;
+    return 1;
+  }
+
   cout << "=== OPPORTUNISTIC ROUTING SIMULATION ===" << endl;
+  cout << "Reading input from: " << inputFile << endl;
   cout << "========================================" << endl;
 
+  string line;
   int numNodes, numEdges, source, numDest;
 
-  cout << "\nEnter number of nodes: ";
-  cin >> numNodes;
+  // Number of nodes
+  getNextDataLine(fin, line);
+  numNodes = stoi(line);
+  cout << "Number of nodes: " << numNodes << endl;
 
-  cout << "Enter source node: ";
-  cin >> source;
+  // Source node
+  getNextDataLine(fin, line);
+  source = stoi(line);
+  cout << "Source node: " << source << endl;
 
   OpportunisticRouting router(numNodes, source);
 
-  cout << "Enter number of destinations: ";
-  cin >> numDest;
+  // Number of destinations
+  getNextDataLine(fin, line);
+  numDest = stoi(line);
+  cout << "Number of destinations: " << numDest << endl;
 
-  cout << "Enter destination nodes: ";
-  for (int i = 0; i < numDest; i++) {
-    int dest;
-    cin >> dest;
-    router.addDestination(dest);
+  // Destination nodes
+  getNextDataLine(fin, line);
+  {
+    istringstream iss(line);
+    for (int i = 0; i < numDest; i++) {
+      int dest;
+      iss >> dest;
+      router.addDestination(dest);
+    }
   }
 
-  cout << "\nEnter number of edges: ";
-  cin >> numEdges;
+  // Number of edges
+  getNextDataLine(fin, line);
+  numEdges = stoi(line);
+  cout << "Number of edges: " << numEdges << endl;
 
-  cout << "Enter edges (from to cost):" << endl;
+  // Edges
   for (int i = 0; i < numEdges; i++) {
+    getNextDataLine(fin, line);
+    istringstream iss(line);
     int from, to;
     double cost;
-    cin >> from >> to >> cost;
+    iss >> from >> to >> cost;
     router.addEdge(from, to, cost);
   }
+
+  // Number of packets
+  int numPackets = 0;
+  if (getNextDataLine(fin, line)) {
+    numPackets = stoi(line);
+  }
+
+  fin.close();
 
   router.displayTopology();
   router.solve();
 
   // Run packet transmission simulation
-  int numPackets;
-  cout << "\nEnter number of packets to simulate: ";
-  cin >> numPackets;
-
   if (numPackets > 0) {
+    cout << "\nSimulating " << numPackets << " packets..." << endl;
     router.runSimulation(numPackets);
   }
 
