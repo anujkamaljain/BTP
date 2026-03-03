@@ -25,13 +25,13 @@
 
 # Edges (from  to  cost) — one per line
 0 2 4
-0 3 4.5
+0 3 8
 1 2 4
-1 3 4.5
+1 3 8
 2 4 5
 2 5 5.5
-3 4 10
-3 5 10
+3 4 7.5
+3 5 8
 
 # Packets per source
 10000
