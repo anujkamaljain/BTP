@@ -728,7 +728,6 @@ public:
          << endl;
 
     // Phase 2: XOR Recovery for each source's missing packets
-    cout << "\nPhase 2: XOR Recovery..." << endl;
     int xorCount = 0;
     int individualCount = 0;
     int edgeCount = 2;
@@ -795,12 +794,6 @@ public:
     cout << "Total packets (all sources combined): " << totalPackets << endl;
     cout << "Packets per source: " << packetsPerSource << endl;
     cout << "Coding Window Size: " << codingWindowSize << endl;
-    cout << "Phase 1 transmissions: " << fixed << setprecision(2) << phase1Trans
-         << endl;
-    cout << "Phase 2 XOR transmissions: " << xorCount << " (cost "
-         << xorCount * edgeCount << ")" << endl;
-    cout << "Phase 2 Individual transmissions: " << individualCount << " (cost "
-         << individualCount * edgeCount << ")" << endl;
     cout << "Total transmissions: " << fixed << setprecision(2)
          << totalTransmissions << endl;
     cout << "Average per packet (overall): " << fixed << setprecision(2) << avgTrans
@@ -835,6 +828,40 @@ public:
       }
     }
 
+  }
+
+  void printOptimalForwardingSets() {
+    cout << "\n========== OPTIMAL FORWARDING SETS (Sources only) ==========" << endl;
+    for (int src : srcDestNodes) {
+      if (bestForwardingSet.find(src) == bestForwardingSet.end()) continue;
+      set<int> dests = sourceDestMap[src];
+      for (const auto &destEntry : bestForwardingSet[src]) {
+        const set<int> &destSet = destEntry.first;
+        // Only print if destSet is a subset of this source's destinations
+        bool isSubset = true;
+        for (int d : destSet) {
+          if (dests.find(d) == dests.end()) { isSubset = false; break; }
+        }
+        if (!isSubset) continue;
+        const set<int> &fs = destEntry.second;
+        cout << "Source " << src << " -> Dest{";
+        for (auto it = destSet.begin(); it != destSet.end(); it++) {
+          if (it != destSet.begin()) cout << ",";
+          cout << *it;
+        }
+        cout << "} : Forwarding Set = {";
+        for (auto it = fs.begin(); it != fs.end(); it++) {
+          if (it != fs.begin()) cout << ",";
+          cout << *it;
+        }
+        cout << "}";
+        if (routingTable[src].count(destSet)) {
+          cout << " (cost=" << fixed << setprecision(4) << routingTable[src][destSet] << ")";
+        }
+        cout << endl;
+      }
+    }
+    cout << "============================================================" << endl;
   }
 
 };
@@ -934,12 +961,11 @@ int main() {
 
   // Build routing tables
   router.solve();
+  router.printOptimalForwardingSets();
   cout.flush();
 
   // Run simulation
   if (packetsPerSource > 0 && codingWindowSize > 0) {
-    cout << "\nPackets per source: " << packetsPerSource << endl;
-    cout << "Coding window size: " << codingWindowSize << endl;
     router.runPhase5Simulation(srcDestNodes, packetsPerSource, codingWindowSize);
   }
 
