@@ -656,65 +656,143 @@ public:
       }
       // Check if it's a forwarding node (Coding Window logic)
       else if (forwardingNodes.count(selectedNode)) {
-        // Process each source's coding window independently
+        // Process each source's packets independently
         for (int src : allSrcDestNodes) {
           pair<int,int> queueKey = {selectedNode, src};
 
-          // Step 1: Fill coding window from queue
-          while ((int)codingWindow[selectedNode][src].size() < codingWindowSize &&
-                 !forwardingQueues[queueKey].empty()) {
-            pair<int, int> windowEntry = forwardingQueues[queueKey].front();
-            forwardingQueues[queueKey].pop();
-            codingWindow[selectedNode][src].push_back(windowEntry.first);
+          // Destinations for this source (specific mapping)
+          set<int> thisDestinations = sourceDestMap[src];
+
+          // Check if this forwarding node can reach any destination directly
+          set<int> fwdNeighbors;
+          for (auto &edge : edges) {
+            if (edge.from == selectedNode) {
+              fwdNeighbors.insert(edge.to);
+            }
+          }
+          bool canReachDest = false;
+          for (int dest : thisDestinations) {
+            if (fwdNeighbors.count(dest)) {
+              canReachDest = true;
+              break;
+            }
           }
 
-          // Step 2: If coding window has packets, transmit a coded packet
-          if (!codingWindow[selectedNode][src].empty()) {
-            int targetWindowSize = (int)codingWindow[selectedNode][src].size();
+          if (canReachDest) {
+            // LAST-HOP FORWARDING NODE: Use coding window logic (unchanged)
 
-            // Destinations for this source (specific mapping)
-            set<int> thisDestinations = sourceDestMap[src];
-
-            int transmissions = 0;
-            set<int> receivedDests = simulateFromForwardingToDestination(
-                selectedNode, thisDestinations, transmissions);
-            totalTransmissions += transmissions;
-            perSourceTransmissions[src] += transmissions;
-
-
-
-            // Increment counter for ALL destinations that received
-            for (int dest : receivedDests) {
-              windowRecvCount[selectedNode][src][dest]++;
-            }
-
-            // Step 3: Check if all destinations received enough coded packets
-            bool allDestsReceived = true;
-            for (int dest : thisDestinations) {
-              if (windowRecvCount[selectedNode][src][dest] < targetWindowSize) {
-                allDestsReceived = false;
-                break;
-              }
-            }
-
-            if (allDestsReceived && targetWindowSize > 0) {
-              for (int pId : codingWindow[selectedNode][src]) {
-                for (int dest : thisDestinations) {
-                  destReceived[src][dest].insert(pId);
-                }
-              }
-              codingWindow[selectedNode][src].clear();
-              for (int dest : thisDestinations) {
-                windowRecvCount[selectedNode][src][dest] = 0;
-              }
-            }
-
-            // Step 4: Refill window
+            // Step 1: Fill coding window from queue
             while ((int)codingWindow[selectedNode][src].size() < codingWindowSize &&
                    !forwardingQueues[queueKey].empty()) {
-              pair<int, int> newEntry = forwardingQueues[queueKey].front();
+              pair<int, int> windowEntry = forwardingQueues[queueKey].front();
               forwardingQueues[queueKey].pop();
-              codingWindow[selectedNode][src].push_back(newEntry.first);
+              codingWindow[selectedNode][src].push_back(windowEntry.first);
+            }
+
+            // Step 2: If coding window has packets, transmit a coded packet
+            if (!codingWindow[selectedNode][src].empty()) {
+              int targetWindowSize = (int)codingWindow[selectedNode][src].size();
+
+              int transmissions = 0;
+              set<int> receivedDests = simulateFromForwardingToDestination(
+                  selectedNode, thisDestinations, transmissions);
+              totalTransmissions += transmissions;
+              perSourceTransmissions[src] += transmissions;
+
+              // Increment counter for ALL destinations that received
+              for (int dest : receivedDests) {
+                windowRecvCount[selectedNode][src][dest]++;
+              }
+
+              // Step 3: Check if all destinations received enough coded packets
+              bool allDestsReceived = true;
+              for (int dest : thisDestinations) {
+                if (windowRecvCount[selectedNode][src][dest] < targetWindowSize) {
+                  allDestsReceived = false;
+                  break;
+                }
+              }
+
+              if (allDestsReceived && targetWindowSize > 0) {
+                for (int pId : codingWindow[selectedNode][src]) {
+                  for (int dest : thisDestinations) {
+                    destReceived[src][dest].insert(pId);
+                  }
+                }
+                codingWindow[selectedNode][src].clear();
+                for (int dest : thisDestinations) {
+                  windowRecvCount[selectedNode][src][dest] = 0;
+                }
+              }
+
+              // Step 4: Refill window
+              while ((int)codingWindow[selectedNode][src].size() < codingWindowSize &&
+                     !forwardingQueues[queueKey].empty()) {
+                pair<int, int> newEntry = forwardingQueues[queueKey].front();
+                forwardingQueues[queueKey].pop();
+                codingWindow[selectedNode][src].push_back(newEntry.first);
+              }
+            }
+          } else {
+            // INTERMEDIATE FORWARDING NODE: Relay packets to next layer (like source)
+            if (!forwardingQueues[queueKey].empty()) {
+              pair<int, int> pktEntry = forwardingQueues[queueKey].front();
+              forwardingQueues[queueKey].pop();
+              int pktId = pktEntry.first;
+
+              if (!fwdNeighbors.empty()) {
+                int retryCount = 0;
+                while (retryCount < 1000) {
+                  retryCount++;
+                  vector<TransmissionOutcome> outcomes =
+                      calculateProbabilityRegions(selectedNode, fwdNeighbors);
+                  double randVal = (double)randomgeneration(global_seed);
+
+                  TransmissionOutcome selected;
+                  for (const auto &outcome : outcomes) {
+                    if (randVal >= outcome.cumProbStart &&
+                        randVal < outcome.cumProbEnd) {
+                      selected = outcome;
+                      break;
+                    }
+                  }
+
+                  totalTransmissions++;
+                  perSourceTransmissions[src]++;
+
+                  if (!selected.successfulNodes.empty()) {
+                    // Check if any destination received directly
+                    bool destReceivedDirectly = false;
+                    for (int dest : thisDestinations) {
+                      if (selected.successfulNodes.count(dest)) {
+                        destReceived[src][dest].insert(pktId);
+                        destReceivedDirectly = true;
+                        break;
+                      }
+                    }
+                    if (destReceivedDirectly) break;
+
+                    // Find best next forwarding node
+                    int bestNode = -1;
+                    double minCost = INF;
+                    for (int node : selected.successfulNodes) {
+                      if (forwardingNodes.count(node) &&
+                          routingTable[node].count(thisDestinations)) {
+                        double cost = routingTable[node][thisDestinations];
+                        if (cost < minCost) {
+                          minCost = cost;
+                          bestNode = node;
+                        }
+                      }
+                    }
+                    if (bestNode != -1) {
+                      forwardingQueues[{bestNode, src}].push({pktId, src});
+                      break;
+                    }
+                  }
+                  // Retransmit if nothing useful received
+                }
+              }
             }
           }
         }
@@ -815,17 +893,31 @@ public:
         routingTable[dest][single] = 0.0;
       }
 
-      // Build routing tables for all intermediate nodes and the source itself
-      // First, build for predecessors of destinations (bottom-up)
-      set<int> predecessors = getPredecessors(thisDestinations);
-      for (int node : predecessors) {
-        if (thisDestinations.find(node) == thisDestinations.end()) {
-          buildRoutingTableForNode(node, thisDestinations);
+      // Build routing tables bottom-up through ALL intermediate layers
+      // Start from destinations and propagate backwards until no new nodes are found
+      set<int> currentLayer = thisDestinations;
+      set<int> processed;
+      for (int d : thisDestinations) processed.insert(d);
+
+      while (true) {
+        set<int> predecessors = getPredecessors(currentLayer);
+        set<int> newNodes;
+        for (int node : predecessors) {
+          if (processed.find(node) == processed.end()) {
+            newNodes.insert(node);
+          }
         }
+        if (newNodes.empty()) break;
+
+        for (int node : newNodes) {
+          buildRoutingTableForNode(node, thisDestinations);
+          processed.insert(node);
+        }
+        currentLayer = newNodes;
       }
 
-      // Build routing table for the source
-      if (thisDestinations.find(src) == thisDestinations.end()) {
+      // Build routing table for the source (if not already processed)
+      if (processed.find(src) == processed.end()) {
         buildRoutingTableForNode(src, thisDestinations);
       }
     }
@@ -890,7 +982,7 @@ int main() {
   }
 
   cout << "=================================================" << endl;
-  cout << "  PHASE 6: MULTI-SOURCE MULTI-DESTINATION NC" << endl;
+  cout << "  PHASE 6: MULTI-SOURCE MULTI-DESTINATION MULTI-HOP NC" << endl;
   cout << "  All nodes act as BOTH source and destination" << endl;
   cout << "=================================================" << endl;
   cout << "Reading input from: " << inputFile << endl;
