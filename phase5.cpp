@@ -1,4 +1,4 @@
-// Multisource-Multidest (4 src/dest)
+// Multisource-Multidest (4 src/dest with 2 hop) with Coding Window
 
 #include <algorithm>
 #include <climits>

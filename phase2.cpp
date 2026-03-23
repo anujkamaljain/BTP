@@ -1,3 +1,7 @@
+/*Extends Phase 1 by adding packet transmission simulation.
+It simulates multiple packet transmissions to validate theoretical 
+costs with empirical results, showing average, min, and max transmissions.*/
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>

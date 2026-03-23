@@ -1,3 +1,7 @@
+/*Further extends Phase 2 by incorporating network coding simulation. 
+It demonstrates the benefits of network coding, such as XOR transmissions, 
+for efficient multicast to multiple destinations.*/
+
 #include <algorithm>
 #include <cmath>
 #include <iomanip>

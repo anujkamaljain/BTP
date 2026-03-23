@@ -1,3 +1,7 @@
+/*Implements the core opportunistic routing algorithm. 
+It computes routing tables and expected transmission costs for
+reaching sets of destinations using forwarding sets. */
+
 #include <algorithm>
 #include <cmath>
 #include <iomanip>

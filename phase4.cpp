@@ -1,4 +1,4 @@
-//Network Coding
+//Implemented Network Coding with Coding window
 
 #include <algorithm>
 #include <climits>
