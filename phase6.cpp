@@ -1,4 +1,4 @@
-// Multi-Source Multi-Destination (max 6 dest/src means 3 dest for each source for 3 sources) Multi-Hop (max 3 hops) NC Simulation with Coding Window 
+//Optimal Multi-Source Multi-Destination (max 6 dest/src means 3 dest for each source for 3 sources) Multi-Hop (max 3 hops) NC Simulation with Coding Window 
 
 #include <algorithm>
 #include <climits>
