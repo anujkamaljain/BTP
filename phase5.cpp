@@ -260,16 +260,15 @@ public:
   }
 
   // Build routing table for a node for ALL subsets of destinations
-  void buildRoutingTableForNode(int node, const set<int> &destinations) {
+  // Returns true if any routing table entry was improved
+  bool buildRoutingTableForNode(int node, const set<int> &destinations) {
+    bool changed = false;
     set<int> neighbors = getNeighbors(node);
 
     // Generate ALL non-empty subsets of the destination set
     vector<set<int>> destSubsets = getAllSubsets(destinations);
 
     for (const auto &destSet : destSubsets) {
-      // Skip if already computed
-      if (routingTable[node].count(destSet)) continue;
-
       bool isDestination =
           (destSet.find(node) != destSet.end() && destSet.size() == 1);
       if (isDestination) {
@@ -280,17 +279,9 @@ public:
       double bestCost = INF;
       set<int> bestFS;
 
-      vector<set<int>> forwardingSets;
-
-      for (int neighbor : neighbors) {
-        set<int> fs;
-        fs.insert(neighbor);
-        forwardingSets.push_back(fs);
-      }
-
-      if (neighbors.size() > 1) {
-        forwardingSets.push_back(neighbors);
-      }
+      // Enumerate ALL non-empty subsets of neighbors as forwarding set candidates
+      // (singletons + full set is insufficient with undirected edges)
+      vector<set<int>> forwardingSets = getAllSubsets(neighbors);
 
       for (const auto &fs : forwardingSets) {
         double cost = calculateCostIterative(node, destSet, fs);
@@ -301,9 +292,20 @@ public:
         }
       }
 
-      routingTable[node][destSet] = bestCost;
-      bestForwardingSet[node][destSet] = bestFS;
+      // Only update if we found a better cost than existing entry
+      double oldCost = routingTable[node].count(destSet) ? routingTable[node][destSet] : INF;
+      if (bestCost < oldCost - EPSILON) {
+        routingTable[node][destSet] = bestCost;
+        bestForwardingSet[node][destSet] = bestFS;
+        changed = true;
+      } else if (!routingTable[node].count(destSet)) {
+        // First time: store even if not improved
+        routingTable[node][destSet] = bestCost;
+        bestForwardingSet[node][destSet] = bestFS;
+        changed = true;
+      }
     }
+    return changed;
   }
 
   // =========== SIMULATION METHODS ===========
@@ -590,11 +592,15 @@ public:
           // Destinations for this source (specific mapping)
           set<int> thisDestinations = sourceDestMap[selectedNode];
 
-          // Get all neighbors of source
+          // Use best forwarding set for this source-destination pair
           set<int> neighbors;
-          for (auto &edge : edges) {
-            if (edge.from == selectedNode) {
-              neighbors.insert(edge.to);
+          if (bestForwardingSet[selectedNode].count(thisDestinations)) {
+            neighbors = bestForwardingSet[selectedNode][thisDestinations];
+          } else {
+            for (auto &edge : edges) {
+              if (edge.from == selectedNode) {
+                neighbors.insert(edge.to);
+              }
             }
           }
 
@@ -804,32 +810,44 @@ public:
 
   // Build routing tables for ALL source-dest pairs
   void solve() {
-    // For each source node, build routing tables to reach all other srcDest nodes
+    // Initialize routing for ALL destination nodes across all sources
     for (int src : srcDestNodes) {
       set<int> thisDestinations = sourceDestMap[src];
-
-      // Initialize routing for destination nodes (cost=0 to themselves)
       for (int dest : thisDestinations) {
         set<int> single;
         single.insert(dest);
         routingTable[dest][single] = 0.0;
       }
-
-      // Build routing tables for all intermediate nodes and the source itself
-      // First, build for predecessors of destinations (bottom-up)
-      set<int> predecessors = getPredecessors(thisDestinations);
-      for (int node : predecessors) {
-        if (thisDestinations.find(node) == thisDestinations.end()) {
-          buildRoutingTableForNode(node, thisDestinations);
-        }
-      }
-
-      // Build routing table for the source
-      if (thisDestinations.find(src) == thisDestinations.end()) {
-        buildRoutingTableForNode(src, thisDestinations);
-      }
     }
 
+    // Multi-pass convergence: repeat until no routing table entry improves
+    bool changed = true;
+    int pass = 0;
+    const int maxPasses = 50; // Safety limit
+
+    while (changed && pass < maxPasses) {
+      changed = false;
+      pass++;
+
+      for (int src : srcDestNodes) {
+        set<int> thisDestinations = sourceDestMap[src];
+
+        // Build routing tables for predecessors of destinations (bottom-up)
+        set<int> predecessors = getPredecessors(thisDestinations);
+        for (int node : predecessors) {
+          if (thisDestinations.find(node) == thisDestinations.end()) {
+            if (buildRoutingTableForNode(node, thisDestinations))
+              changed = true;
+          }
+        }
+
+        // Build routing table for the source
+        if (thisDestinations.find(src) == thisDestinations.end()) {
+          if (buildRoutingTableForNode(src, thisDestinations))
+            changed = true;
+        }
+      }
+    }
   }
 
   void printOptimalForwardingSets() {
