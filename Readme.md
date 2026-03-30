@@ -1,6 +1,6 @@
 # Opportunistic Routing with Network Coding — Simulation Framework
 
-A progressive C++ simulation of **opportunistic routing** and **network coding** techniques for wireless networks. The project is organized into 6 phases, each building upon the previous one to add more realistic and complex capabilities.
+A progressive C++ simulation of **opportunistic routing** and **network coding** techniques for wireless networks. The project is organized into 6 phases, each building upon the previous one to add more realistic and complex capabilities..
 
 ---
 
