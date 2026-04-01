@@ -896,7 +896,7 @@ public:
     }
 
     // Results
-    double avgTrans = totalTransmissions / totalPackets;
+    double avgTrans = totalTransmissions / packetsPerSource;
 
     cout << "\n********** PHASE 6 RESULTS (MULTI-SRC MULTI-DEST CODING WINDOW) **********" << endl;
     cout << "Total packets (all sources combined): " << totalPackets << endl;
@@ -965,20 +965,13 @@ public:
   }
 
   void printOptimalForwardingSets() {
-    cout << "\n========== OPTIMAL FORWARDING SETS (Sources only) ==========" << endl;
-    for (int src : srcDestNodes) {
-      if (bestForwardingSet.find(src) == bestForwardingSet.end()) continue;
-      set<int> dests = sourceDestMap[src];
-      for (const auto &destEntry : bestForwardingSet[src]) {
+    cout << "\n========== OPTIMAL FORWARDING SETS (All nodes) ==========" << endl;
+    for (const auto &nodeEntry : bestForwardingSet) {
+      int node = nodeEntry.first;
+      for (const auto &destEntry : nodeEntry.second) {
         const set<int> &destSet = destEntry.first;
-        // Only print if destSet is a subset of this source's destinations
-        bool isSubset = true;
-        for (int d : destSet) {
-          if (dests.find(d) == dests.end()) { isSubset = false; break; }
-        }
-        if (!isSubset) continue;
         const set<int> &fs = destEntry.second;
-        cout << "Source " << src << " -> Dest{";
+        cout << "Node " << node << " -> Dest{";
         for (auto it = destSet.begin(); it != destSet.end(); it++) {
           if (it != destSet.begin()) cout << ",";
           cout << *it;
@@ -989,13 +982,13 @@ public:
           cout << *it;
         }
         cout << "}";
-        if (singletonCostTable[src].count(destSet)) {
-          cout << " (cost=" << fixed << setprecision(4) << singletonCostTable[src][destSet] << ")";
+        if (singletonCostTable[node].count(destSet)) {
+          cout << " (cost=" << fixed << setprecision(4) << singletonCostTable[node][destSet] << ")";
         }
         cout << endl;
       }
     }
-    cout << "============================================================" << endl;
+    cout << "==========================================================" << endl;
   }
 
 };

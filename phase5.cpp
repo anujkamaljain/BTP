@@ -796,7 +796,7 @@ public:
     }
 
     // Results
-    double avgTrans = totalTransmissions / totalPackets;
+    double avgTrans = totalTransmissions / packetsPerSource;
 
     cout << "\n********** PHASE 5 RESULTS (MULTI-SRC MULTI-DEST CODING WINDOW) **********" << endl;
     cout << "Total packets (all sources combined): " << totalPackets << endl;
@@ -851,20 +851,13 @@ public:
   }
 
   void printOptimalForwardingSets() {
-    cout << "\n========== OPTIMAL FORWARDING SETS (Sources only) ==========" << endl;
-    for (int src : srcDestNodes) {
-      if (bestForwardingSet.find(src) == bestForwardingSet.end()) continue;
-      set<int> dests = sourceDestMap[src];
-      for (const auto &destEntry : bestForwardingSet[src]) {
+    cout << "\n========== OPTIMAL FORWARDING SETS (All nodes) ==========" << endl;
+    for (int node = 0; node < numNodes; node++) {
+      if (bestForwardingSet.find(node) == bestForwardingSet.end()) continue;
+      for (const auto &destEntry : bestForwardingSet[node]) {
         const set<int> &destSet = destEntry.first;
-        // Only print if destSet is a subset of this source's destinations
-        bool isSubset = true;
-        for (int d : destSet) {
-          if (dests.find(d) == dests.end()) { isSubset = false; break; }
-        }
-        if (!isSubset) continue;
         const set<int> &fs = destEntry.second;
-        cout << "Source " << src << " -> Dest{";
+        cout << "Node " << node << " -> Dest{";
         for (auto it = destSet.begin(); it != destSet.end(); it++) {
           if (it != destSet.begin()) cout << ",";
           cout << *it;
@@ -875,8 +868,8 @@ public:
           cout << *it;
         }
         cout << "}";
-        if (routingTable[src].count(destSet)) {
-          cout << " (cost=" << fixed << setprecision(4) << routingTable[src][destSet] << ")";
+        if (routingTable[node].count(destSet)) {
+          cout << " (cost=" << fixed << setprecision(4) << routingTable[node][destSet] << ")";
         }
         cout << endl;
       }
