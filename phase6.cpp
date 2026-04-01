@@ -16,6 +16,27 @@
 
 using namespace std;
 
+// TeeBuf: a streambuf that writes to two output streambufs simultaneously
+class TeeBuf : public streambuf {
+public:
+    TeeBuf(streambuf* sb1, streambuf* sb2) : sb1_(sb1), sb2_(sb2) {}
+protected:
+    virtual int overflow(int c) override {
+        if (c == EOF) return !EOF;
+        int r1 = sb1_->sputc(c);
+        int r2 = sb2_->sputc(c);
+        return (r1 == EOF || r2 == EOF) ? EOF : c;
+    }
+    virtual int sync() override {
+        int r1 = sb1_->pubsync();
+        int r2 = sb2_->pubsync();
+        return (r1 == 0 && r2 == 0) ? 0 : -1;
+    }
+private:
+    streambuf* sb1_;
+    streambuf* sb2_;
+};
+
 const double INF = numeric_limits<double>::infinity();
 const double EPSILON = 0.001;
 
@@ -991,11 +1012,31 @@ static bool getNextDataLine(ifstream &fin, string &line) {
 }
 
 int main() {
+  // Set up tee: duplicate all cout output to both console and output file (append mode)
+  ofstream outFile("phase6_output.txt", ios::app);
+  if (!outFile.is_open()) {
+    cerr << "WARNING: Could not open phase6_output.txt for writing. Output will only go to console." << endl;
+  } else {
+    // Write a run separator with timestamp
+    time_t now = time(nullptr);
+    char timeStr[64];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    outFile << "\n\n=============== RUN: " << timeStr << " ===============\n\n";
+  }
+  streambuf* origCoutBuf = cout.rdbuf();
+  TeeBuf* teeBuf = nullptr;
+  if (outFile.is_open()) {
+    teeBuf = new TeeBuf(origCoutBuf, outFile.rdbuf());
+    cout.rdbuf(teeBuf);
+  }
+
   const string inputFile = "phase6_input.txt";
   ifstream fin(inputFile);
   if (!fin.is_open()) {
     cerr << "ERROR: Could not open " << inputFile << endl;
     cerr << "Make sure phase6_input.txt is in the same directory." << endl;
+    cout.rdbuf(origCoutBuf);
+    delete teeBuf;
     return 1;
   }
 
@@ -1080,6 +1121,13 @@ int main() {
   if (packetsPerSource > 0 && codingWindowSize > 0) {
     router.runPhase5Simulation(srcDestNodes, packetsPerSource, codingWindowSize);
   }
+
+  // Restore original cout buffer and clean up
+  cout.rdbuf(origCoutBuf);
+  delete teeBuf;
+  outFile.close();
+
+  cout << "\nOutput also saved to: phase6_output.txt" << endl;
 
   return 0;
 }

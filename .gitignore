@@ -11,3 +11,8 @@
 
 # Temporary files
 *.log
+
+# Simulation output files
+phase5_output.txt
+phase6_output.txt
+phase6a_output.txt
