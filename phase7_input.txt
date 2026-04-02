@@ -1,0 +1,67 @@
+# ============================================
+# Phase 7 Input File
+# Multi-Source Multi-Destination (Undirected)
+# ============================================
+# Graph is UNDIRECTED — each edge is specified
+# once and applies in both directions with same cost
+# Lines starting with # are comments (ignored)
+# ============================================
+
+# Number of nodes in the network
+16
+
+# Number of source nodes
+8
+
+# Source-Destination mapping
+# Format: source_node  num_destinations  dest1 dest2 ...
+0 4 12 13 14 15
+1 4 12 13 14 15
+2 4 12 13 14 15
+3 4 12 13 14 15
+12 4 0 1 2 3
+13 4 0 1 2 3
+14 4 0 1 2 3
+15 4 0 1 2 3
+
+# Number of edges (each specified once, undirected)
+30
+
+# Edges (node1  node2  cost) — one per line
+# Cost applies in BOTH directions
+0 4 4
+0 5 5
+1 4 4
+1 5 4.5
+1 6 5
+2 5 4.5
+2 6 5
+2 7 5
+3 6 4.5 
+3 7 4 
+4 8 5
+4 9 4.5 
+5 8 4
+5 9 4.5
+5 10 5.5
+6 9 5
+6 10 5.5
+6 11 6
+7 10 5
+7 11 4.5
+8 12 4.5
+8 13 5.5
+9 12 5
+9 13 4.5
+9 14 5
+10 13 4.5
+10 14 5
+10 15 5.5
+11 14 4
+11 15 5.5
+
+# Packets per source
+10000
+
+# Coding window size
+64
