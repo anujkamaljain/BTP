@@ -136,6 +136,7 @@ private:
   map<int, map<int, double>> graph;
   map<int, map<set<int>, double>> routingTable;
   map<int, map<set<int>, double>> singletonCostTable; // cost when using best singleton FS (heuristic)
+  map<int, map<set<int>, double>> cwCostTable;
   map<int, map<set<int>, set<int>>> bestForwardingSet;
   set<int> srcDestNodes;
   map<int, set<int>> sourceDestMap; // source -> its specific destinations
@@ -776,70 +777,131 @@ public:
               }
             }
           } else {
-            // INTERMEDIATE FORWARDING NODE: Relay packets to next layer (like source)
-            if (!forwardingQueues[queueKey].empty()) {
-              pair<int, int> pktEntry = forwardingQueues[queueKey].front();
-              forwardingQueues[queueKey].pop();
-              int pktId = pktEntry.first;
-
-              // Use best forwarding set for relay (heuristic: singleton)
-              set<int> relayFS;
-              if (bestForwardingSet[selectedNode].count(thisDestinations)) {
-                relayFS = bestForwardingSet[selectedNode][thisDestinations];
-              } else {
-                relayFS = fwdNeighbors;
+            // INTERMEDIATE FORWARDING NODE: Use coding window with downstream forwarding targets
+            set<int> nextHopTargets;
+            for (int nbr : fwdNeighbors) {
+              if (forwardingNodes.count(nbr) &&
+                  routingTable[nbr].count(thisDestinations) &&
+                  routingTable[selectedNode].count(thisDestinations) &&
+                  routingTable[nbr][thisDestinations] < routingTable[selectedNode][thisDestinations] - EPSILON) {
+                nextHopTargets.insert(nbr);
               }
-              if (!relayFS.empty()) {
-                int retryCount = 0;
-                while (retryCount < 1000) {
-                  retryCount++;
-                  vector<TransmissionOutcome> outcomes =
-                      calculateProbabilityRegions(selectedNode, relayFS);
-                  double randVal = (double)randomgeneration(global_seed);
+            }
 
-                  TransmissionOutcome selected;
-                  for (const auto &outcome : outcomes) {
-                    if (randVal >= outcome.cumProbStart &&
-                        randVal < outcome.cumProbEnd) {
-                      selected = outcome;
-                      break;
+            if (!nextHopTargets.empty()) {
+              // Step 1: Fill coding window from queue
+              while ((int)codingWindow[selectedNode][src].size() < codingWindowSize &&
+                     !forwardingQueues[queueKey].empty()) {
+                pair<int, int> windowEntry = forwardingQueues[queueKey].front();
+                forwardingQueues[queueKey].pop();
+                codingWindow[selectedNode][src].push_back(windowEntry.first);
+              }
+
+              // Step 2: If coding window has packets, transmit a coded packet
+              if (!codingWindow[selectedNode][src].empty()) {
+                int targetWindowSize = (int)codingWindow[selectedNode][src].size();
+
+                int transmissions = 0;
+                set<int> receivedTargets = simulateFromForwardingToDestination(
+                    selectedNode, nextHopTargets, transmissions);
+                totalTransmissions += transmissions;
+                perSourceTransmissions[src] += transmissions;
+
+                for (int target : receivedTargets) {
+                  windowRecvCount[selectedNode][src][target]++;
+                }
+
+                // Step 3: Check if all targets received enough coded packets
+                bool allTargetsReceived = true;
+                for (int target : nextHopTargets) {
+                  if (windowRecvCount[selectedNode][src][target] < targetWindowSize) {
+                    allTargetsReceived = false;
+                    break;
+                  }
+                }
+
+                if (allTargetsReceived && targetWindowSize > 0) {
+                  for (int pId : codingWindow[selectedNode][src]) {
+                    for (int target : nextHopTargets) {
+                      forwardingQueues[{target, src}].push({pId, src});
                     }
                   }
+                  codingWindow[selectedNode][src].clear();
+                  for (int target : nextHopTargets) {
+                    windowRecvCount[selectedNode][src][target] = 0;
+                  }
+                }
 
-                  totalTransmissions++;
-                  perSourceTransmissions[src]++;
+                // Step 4: Refill window
+                while ((int)codingWindow[selectedNode][src].size() < codingWindowSize &&
+                       !forwardingQueues[queueKey].empty()) {
+                  pair<int, int> newEntry = forwardingQueues[queueKey].front();
+                  forwardingQueues[queueKey].pop();
+                  codingWindow[selectedNode][src].push_back(newEntry.first);
+                }
+              }
+            } else {
+              // Fallback: no downstream forwarding targets found, relay one-by-one
+              if (!forwardingQueues[queueKey].empty()) {
+                pair<int, int> pktEntry = forwardingQueues[queueKey].front();
+                forwardingQueues[queueKey].pop();
+                int pktId = pktEntry.first;
 
-                  if (!selected.successfulNodes.empty()) {
-                    // Check if any destination received directly
-                    bool destReceivedDirectly = false;
-                    for (int dest : thisDestinations) {
-                      if (selected.successfulNodes.count(dest)) {
-                        destReceived[src][dest].insert(pktId);
-                        destReceivedDirectly = true;
+                set<int> relayFS;
+                if (bestForwardingSet[selectedNode].count(thisDestinations)) {
+                  relayFS = bestForwardingSet[selectedNode][thisDestinations];
+                } else {
+                  relayFS = fwdNeighbors;
+                }
+                if (!relayFS.empty()) {
+                  int retryCount = 0;
+                  vector<TransmissionOutcome> outcomes =
+                      calculateProbabilityRegions(selectedNode, relayFS);
+                  while (retryCount < 1000) {
+                    retryCount++;
+                    double randVal = (double)randomgeneration(global_seed);
+
+                    TransmissionOutcome selected;
+                    for (const auto &outcome : outcomes) {
+                      if (randVal >= outcome.cumProbStart &&
+                          randVal < outcome.cumProbEnd) {
+                        selected = outcome;
                         break;
                       }
                     }
-                    if (destReceivedDirectly) break;
 
-                    // Find best next forwarding node
-                    int bestNode = -1;
-                    double minCost = INF;
-                    for (int node : selected.successfulNodes) {
-                      if (forwardingNodes.count(node) &&
-                          routingTable[node].count(thisDestinations)) {
-                        double cost = routingTable[node][thisDestinations];
-                        if (cost < minCost) {
-                          minCost = cost;
-                          bestNode = node;
+                    totalTransmissions++;
+                    perSourceTransmissions[src]++;
+
+                    if (!selected.successfulNodes.empty()) {
+                      bool destReceivedDirectly = false;
+                      for (int dest : thisDestinations) {
+                        if (selected.successfulNodes.count(dest)) {
+                          destReceived[src][dest].insert(pktId);
+                          destReceivedDirectly = true;
+                          break;
                         }
                       }
-                    }
-                    if (bestNode != -1) {
-                      forwardingQueues[{bestNode, src}].push({pktId, src});
-                      break;
+                      if (destReceivedDirectly) break;
+
+                      int bestNode = -1;
+                      double minCost = INF;
+                      for (int node : selected.successfulNodes) {
+                        if (forwardingNodes.count(node) &&
+                            routingTable[node].count(thisDestinations)) {
+                          double cost = routingTable[node][thisDestinations];
+                          if (cost < minCost) {
+                            minCost = cost;
+                            bestNode = node;
+                          }
+                        }
+                      }
+                      if (bestNode != -1) {
+                        forwardingQueues[{bestNode, src}].push({pktId, src});
+                        break;
+                      }
                     }
                   }
-                  // Retransmit if nothing useful received
                 }
               }
             }
@@ -1003,13 +1065,232 @@ public:
           cout << *it;
         }
         cout << "}";
-        if (singletonCostTable[node].count(destSet)) {
+        if (cwCostTable[node].count(destSet)) {
+          cout << " (cost=" << fixed << setprecision(4) << cwCostTable[node][destSet] << ")";
+        } else if (singletonCostTable[node].count(destSet)) {
           cout << " (cost=" << fixed << setprecision(4) << singletonCostTable[node][destSet] << ")";
         }
         cout << endl;
       }
     }
     cout << "==========================================================" << endl;
+  }
+
+  // =========== CW DISPLAY COST METHODS (display-only, no effect on routing or simulation) ===========
+
+  double couponCollectorCost(int node, const set<int>& targets) {
+    vector<double> probs;
+    for (int t : targets) {
+      if (graph[node].count(t)) {
+        probs.push_back(1.0 / graph[node][t]);
+      } else {
+        return INF;
+      }
+    }
+    int n = probs.size();
+    if (n == 0) return INF;
+
+    double expected = 0.0;
+    for (int mask = 1; mask < (1 << n); mask++) {
+      double prodQ = 1.0;
+      int bits = 0;
+      for (int i = 0; i < n; i++) {
+        if (mask & (1 << i)) {
+          prodQ *= (1.0 - probs[i]);
+          bits++;
+        }
+      }
+      double denom = 1.0 - prodQ;
+      if (denom < 1e-15) continue;
+      if (bits % 2 == 1)
+        expected += 1.0 / denom;
+      else
+        expected -= 1.0 / denom;
+    }
+    return expected;
+  }
+
+  double calculateCWCostIterative(int node, const set<int> &destSet,
+                                  const set<int> &forwardingSet) {
+    if (destSet.size() == 1 && destSet.find(node) != destSet.end())
+      return 0.0;
+
+    vector<double> costs;
+    vector<int> fsNodes;
+    for (int neighbor : forwardingSet) {
+      if (graph[node].count(neighbor)) {
+        costs.push_back(graph[node][neighbor]);
+        fsNodes.push_back(neighbor);
+      }
+    }
+    if (costs.empty()) return INF;
+
+    vector<double> p;
+    for (double c : costs) p.push_back(1.0 / c);
+
+    double x = 5.0;
+    double prevX;
+    int iterations = 0;
+    const int maxIterations = 1000;
+
+    do {
+      prevX = x;
+      double newX = 0.0;
+      int n = fsNodes.size();
+
+      for (int mask = 0; mask < (1 << n); mask++) {
+        double probability = 1.0;
+        set<int> successfulNodes;
+        for (int i = 0; i < n; i++) {
+          if (mask & (1 << i)) {
+            probability *= p[i];
+            successfulNodes.insert(fsNodes[i]);
+          } else {
+            probability *= (1.0 - p[i]);
+          }
+        }
+
+        double remainingCost = 0.0;
+        set<int> uncoveredDests = destSet;
+        for (int sNode : successfulNodes) uncoveredDests.erase(sNode);
+
+        if (uncoveredDests.empty()) {
+          remainingCost = 0.0;
+        } else if (successfulNodes.empty()) {
+          remainingCost = prevX;
+        } else {
+          double minCost = INF;
+          for (int sNode : successfulNodes) {
+            double costFromSNode = INF;
+            if (uncoveredDests.size() == 1) {
+              int uncovDest = *uncoveredDests.begin();
+              set<int> singleDestSet;
+              singleDestSet.insert(uncovDest);
+              if (cwCostTable[sNode].count(singleDestSet)) {
+                costFromSNode = cwCostTable[sNode][singleDestSet];
+              } else if (graph[sNode].count(uncovDest)) {
+                costFromSNode = graph[sNode][uncovDest];
+              } else if (graph[node].count(uncovDest)) {
+                costFromSNode = graph[node][uncovDest];
+              }
+            } else {
+              if (cwCostTable[sNode].count(uncoveredDests)) {
+                costFromSNode = cwCostTable[sNode][uncoveredDests];
+              } else if (cwCostTable[node].count(uncoveredDests)) {
+                costFromSNode = cwCostTable[node][uncoveredDests];
+              }
+            }
+            minCost = min(minCost, costFromSNode);
+          }
+          remainingCost = minCost;
+        }
+        newX += probability * (1.0 + remainingCost);
+      }
+      x = newX;
+      iterations++;
+    } while (fabs(x - prevX) > EPSILON && iterations < maxIterations);
+
+    return x;
+  }
+
+  void buildCWCostForNode(int node, const set<int>& destinations, const set<int>& fwdNodes) {
+    set<int> neighbors = getNeighbors(node);
+    vector<set<int>> destSubsets = getAllSubsets(destinations);
+
+    for (const auto& destSet : destSubsets) {
+      if (destSet.size() == 1 && destSet.count(node)) {
+        cwCostTable[node][destSet] = 0.0;
+        continue;
+      }
+
+      set<int> reachableDests;
+      for (int d : destSet) {
+        if (neighbors.count(d)) reachableDests.insert(d);
+      }
+
+      if (fwdNodes.count(node)) {
+        if (!reachableDests.empty()) {
+          cwCostTable[node][destSet] = couponCollectorCost(node, reachableDests);
+        } else {
+          set<int> nextHopTargets;
+          for (int nbr : neighbors) {
+            if (fwdNodes.count(nbr) &&
+                routingTable[nbr].count(destSet) &&
+                routingTable[node].count(destSet) &&
+                routingTable[nbr][destSet] < routingTable[node][destSet] - EPSILON) {
+              nextHopTargets.insert(nbr);
+            }
+          }
+          if (!nextHopTargets.empty()) {
+            double cost = couponCollectorCost(node, nextHopTargets);
+            for (int t : nextHopTargets) {
+              double tCost = cwCostTable[t].count(destSet) ? cwCostTable[t][destSet] : INF;
+              if (tCost >= INF) { cost = INF; break; }
+              cost += tCost;
+            }
+            cwCostTable[node][destSet] = cost;
+          } else {
+            cwCostTable[node][destSet] = routingTable[node].count(destSet) ? routingTable[node][destSet] : INF;
+          }
+        }
+      } else {
+        if (bestForwardingSet[node].count(destSet)) {
+          set<int> fs = bestForwardingSet[node][destSet];
+          cwCostTable[node][destSet] = calculateCWCostIterative(node, destSet, fs);
+        } else {
+          cwCostTable[node][destSet] = INF;
+        }
+      }
+    }
+  }
+
+  void computeCWDisplayCosts() {
+    set<int> fwdNodes;
+    for (int i = 0; i < numNodes; i++) {
+      if (srcDestNodes.find(i) == srcDestNodes.end()) {
+        bool hasEdge = false;
+        for (auto& e : edges) {
+          if (e.from == i || e.to == i) { hasEdge = true; break; }
+        }
+        if (hasEdge) fwdNodes.insert(i);
+      }
+    }
+
+    for (int src : srcDestNodes) {
+      set<int> dests = sourceDestMap[src];
+      for (int d : dests) {
+        set<int> single;
+        single.insert(d);
+        cwCostTable[d][single] = 0.0;
+      }
+    }
+
+    for (int src : srcDestNodes) {
+      set<int> dests = sourceDestMap[src];
+      set<int> currentLayer = dests;
+      set<int> processed;
+      for (int d : dests) processed.insert(d);
+
+      while (true) {
+        set<int> preds = getPredecessors(currentLayer);
+        set<int> newNodes;
+        for (int n : preds) {
+          if (processed.find(n) == processed.end())
+            newNodes.insert(n);
+        }
+        if (newNodes.empty()) break;
+
+        for (int n : newNodes) {
+          buildCWCostForNode(n, dests, fwdNodes);
+          processed.insert(n);
+        }
+        currentLayer = newNodes;
+      }
+
+      if (processed.find(src) == processed.end()) {
+        buildCWCostForNode(src, dests, fwdNodes);
+      }
+    }
   }
 
 };
@@ -1129,6 +1410,7 @@ int main() {
 
   // Build routing tables
   router.solve();
+  router.computeCWDisplayCosts();
   router.printOptimalForwardingSets();
   cout.flush();
 
