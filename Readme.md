@@ -546,4 +546,4 @@ BTP/
 
 ---
 
-"All rights reserved. Unauthorized use prohibited."
+"All rights reserved. Unauthorized use prohibited.."
